@@ -1,0 +1,3 @@
+[deps]
+Stock_Market_Simulation = "8d9c170c-8678-48a7-bd12-429149b547e6"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
