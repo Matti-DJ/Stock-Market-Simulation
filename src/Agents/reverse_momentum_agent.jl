@@ -8,7 +8,6 @@ Date: 20.08.26
 =#
 
 const SCRIPT_VERSION = "1.0.0"
-
 using Agents
 
 """
@@ -20,7 +19,7 @@ using Agents
 - `times_waited`: Tracks how often the agent had to wait for the market to go up / down
 - `avg_time_between_trades`: tracks the avg time between 2 trades
 """
-@agent struct ReverseMarketAgent(Agent) <: AbstractMarketAgent
+@agent struct ReverseMomentumAgent(Agent) <: AbstractMarketAgent
     times_waited::Int
     avg_time_between_trades::Float64
 end

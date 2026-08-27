@@ -9,9 +9,7 @@ Date: 20.08.26
 =#
 
 const SCRIPT_VERSION = "1.0.0"
-
 using Agents
-include("../Item.jl")
 
 abstract type AbstractMarketAgent <: AbstractAgent end
 
@@ -20,24 +18,71 @@ abstract type AbstractMarketAgent <: AbstractAgent end
     The generic agent with no behaviour,
     it contains all shared fields.
 
-- `net_worth`: worth of all assets `assets + cash`
 - `cash`: cash on hand to buy the items
 - `assets`: all items the agent owns
-- `shares_bought`: How many shares the agent has bought
-- `shares_sold`: how many shares the agent has sold
-- `volume_bought`: shares the agent has bought as price
-- `volume_sold`: shares the agent has sold as price
-- `force_sell`: hwo often the agent was forced to sell
-- `avg_time_between_trades`: The average time it takes the agent to do 1 trade
+- `items_bought`: How many items the agent has bought
+- `items_sold`: how many items the agent has sold
+- `volume_bought`: items the agent has bought as price
+- `volume_sold`: items the agent has sold as price
+- `ticks_of_trades`: The tick of each trade
+- `buy_orders`
+- `sell_orders`
 """
 @agent struct Agent(NoSpaceAgent) <: AbstractMarketAgent
-    net_worth::Flaot64 = 0.0
     cash::Float64 = 0.0
     assets::Vector{Item} = Item[]
-    shares_bought::Int = 0
-    shares_sold::Int = 0
+    items_bought::Int = 0
+    items_sold::Int = 0
     volume_bought::Float64 = 0.0
     volume_sold::Float64 = 0.0
-    force_sell::Int = 0
-    avg_time_between_trades = 0.0
+    ticks_of_trades::Vector{Int} = Int[]
+    buy_orders::Int = 0
+    sell_orders::Int = 0
+end
+
+"""
+    Adds the new Items to the agent and updates other fields.
+
+# Params
+- `agent`: the agent who bought the items.
+- `items`
+- `item_value`
+- `tick`: The tick at which the trade was done
+"""
+function record_buy_order!(agent::AbstractMarketAgent, items::Vector{Item}, item_value::Float64, tick::Int)::AbstractMarketAgent
+    (agent.cash - (length(items)*item_value) >= 0) ? agent.cash -= (length(items)*item_value) : error("Not enough Money")
+    append!(agent.assets, items)
+
+
+    agent.items_bought += length(items)
+    agent.volume_bought += (length(items)*item_value)
+
+    push!(agent.ticks_of_trades, tick)
+    agent.buy_orders += 1
+
+    return agent
+end
+
+"""
+    Removes the sold items from the agent and updates other fields
+
+# Params
+- `agent`: the agent who sold the items
+- `items`: the items sold
+- `item_value`: the price at which the items were sold
+- `tick`: The tick at which the trade was done
+"""
+function record_sell_order!(agent::AbstractMarketAgent, items::Vector{Item}, item_value::Float64, tick::Int)::AbstractMarketAgent
+    quantity = length(items)
+    all(item -> item in agent.assets, items) ? filter!(a -> !(a in items), agent.assets) : error("Not enough items to sell")
+
+    agent.cash += (quantity * item_value)
+
+    agent.items_sold += quantity
+    agent.volume_sold += (quantity * item_value)
+
+    push!(agent.ticks_of_trades, tick)
+    agent.sell_orders += 1
+
+    return agent
 end

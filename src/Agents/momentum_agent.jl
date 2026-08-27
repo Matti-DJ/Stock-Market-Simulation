@@ -8,7 +8,6 @@ Date: 20.08.26
 =#
 
 const SCRIPT_VERSION = "1.0.0"
-
 using Agents
 
 

@@ -8,7 +8,6 @@ Date: 20.08.26
 =#
 
 const SCRIPT_VERSION = "1.0.0"
-
 using Agents
 
 """
@@ -19,9 +18,9 @@ using Agents
     (each trade it is involved in). At the end we can see how close it got to predicting the market.
 
 - `predicted_high`: What the agent thinks the market value will reach
-- `predicted_high`: What the agent thinks the market value will drop to
+- `predicted_low`: What the agent thinks the market value will drop to
 """
 @agent struct InformedAgent(Agent) <: AbstractMarketAgent
     predicted_high::Float64
-    predicted_low::FLoat64
+    predicted_low::Float64
 end

@@ -2,81 +2,60 @@
 # Julia Script
 
 #=
-Description: The Item which will be traded in the simulation.
+Description: 
 Author: matthiasdejong
-Date: 20.08.26
+Date: 24.08.26
 =#
 
 const SCRIPT_VERSION = "1.0.0"
-
 using UUIDs
-
 
 """
     A generic Item which can be anything,
     and will be traded among the agents.
 
 - `ID`: unique id for each item
-- `value`: current value of the item
+- `latest_value`: current value of the item
 - `times_traded`: how often the item was traded
-- `unique_owners`: how many unique owners the item had
 - `owners`: all of the owners the item had, also duplicates
-- `lowest_price`: lowest price the Item was sold for
-- `highest_price`: highest price the Item was sold for
+- `lowest_value`: lowest price the Item was sold for
+- `highest_value`: highest price the Item was sold for
 """
 mutable struct Item
     ID::UUID
-    value::Float64
+    latest_value::Float64
     times_traded::Int
-    unique_owners:Int
-    owners::Vecotr{Int}
-    lowest_price::Float64
-    highest_price::Float64
+    Owners::Vector{Int}
+    lowest_value::Float64
+    highest_value::Float64
 end
 
-#custom constructor with values that stay the same already filled in
-Item(value::Float64) = Item(uuid4(), value, 0, Int[], 0, value, value)
-
-
-"""
-    Assigns owners to the specific instance of the Item.
-    -> checks if there already was that owner, if not then adds them to owners and increments unique_owners by 1.
-
-# Params
-- `item`: the item which the owners gets assigned to
-- `owner_id`: the owner id to check for in item.owners
-
-# return
-- `item`: returns the item wth the changed fields
-"""
-function assign_owner!(item::Item, owner_id::Int)::Item
-    if owner_id ∉ item.owners
-        push!(item.owners, owner_id)
-        item.unique_owners += 1
-    end
-    return item
-end
+#simplified constructor
+Item(value::Float64) = Item(uuid4(), value, 0, Int[], value, value)
 
 """
-    Records the trade of an Item
-    -> assigns a new owner to the item
-    -> assigns the price it was traded as to the item
+    It updates the `Owners` field for the Item but not the assets field on the Agents side.
+    This function also updates all the `value` fields and checks for highs / lows.
 
-# Params
-- `item`: Item which is traded
-- `price`: the price it was bought for
-- `buyer_id`: buyer of the item
+#Params
+- `item`
+- `new_owner_id`
+- `item_value`: At which price the Item was traded
 
-# Return
-- `item`: returns the item which was bought
+THIS ONLY RECORDS THE TRADE ORDER ON THE ITEM SIDE.
 """
-function record_trade!(item::Item, price::Float64, buyer_id::int)::Item
+function record_trade!(item::Item, new_owner_id::Int, item_value::Float64)::Item
+
+    #assign a new owner to the item
+    push!(item.Owners, new_owner_id)
+
+    #assign a new value to the item
+    !(item_value < 0) ?  item.latest_value = item_value : error("value can't be negative")
+
+    #checks for new highest and lowest values
+    item.lowest_value = min(item.lowest_value, item_value)
+    item.highest_value = max(item.highest_value, item_value)
+
     item.times_traded += 1
-    item.value = price
-
-    item.highest_price < price ? item.highest_price = price
-    item.lowest_price > price ? item.lowest_price = price
-
-    assign_owner!(item, buyer_id)
     return item
 end
