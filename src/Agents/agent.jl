@@ -8,7 +8,7 @@ Author: matthiasdejong
 Date: 20.08.26
 =#
 
-const SCRIPT_VERSION = "1.0.0"
+const SCRIPT_VERSION = "1.1.0"
 using Agents
 
 abstract type AbstractMarketAgent <: AbstractAgent end
@@ -38,6 +38,8 @@ abstract type AbstractMarketAgent <: AbstractAgent end
     ticks_of_trades::Vector{Int} = Int[]
     buy_orders::Int = 0
     sell_orders::Int = 0
+    starting_cash::Float64 = 0.0
+    starting_assets::Vector{Item} = Item[]
 end
 
 """
@@ -85,4 +87,22 @@ function record_sell_order!(agent::AbstractMarketAgent, items::Vector{Item}, ite
     agent.sell_orders += 1
 
     return agent
+end
+
+"""
+    returns the profit which the agent made,
+    does also count the value of the assets the agent currently has.
+"""
+function get_profit(agent::AbstractMarketAgent)
+    asset_value = 0.0
+    for asset in agent.assets
+        asset_value += asset.latest_value
+    end
+
+    starting_assets_value = 0.0
+    for starting_asset in agent.starting_assets
+        starting_assets_value += starting_asset.latest_value
+    end
+
+    return (asset_value + agent.cash) - (agent.starting_cash + starting_assets_value)
 end

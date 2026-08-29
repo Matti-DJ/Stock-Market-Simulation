@@ -7,7 +7,7 @@ Author: matthiasdejong
 Date: 26.08.26
 =#
 
-const SCRIPT_VERSION = "1.0.0"
+const SCRIPT_VERSION = "1.1.0"
 
 include("Item.jl")
 include("orderbook.jl")
@@ -19,6 +19,7 @@ include("Agents/reverse_momentum_agent.jl")
 
 using UUIDs
 using Random
+using Statistics
 
 const AGENT_TYPES = (MarketAgent, NoiseAgent, InformedAgent, MomentumAgent, ReverseMomentumAgent)
 
@@ -44,7 +45,7 @@ struct SimulationConfig
     reprice_tick::Int
 end
 
-SimulationConfig() = SimulationConfig(100, 1000.0, 10000, 300.0, 100000, 10, 100)
+SimulationConfig() = SimulationConfig(100, 10000.0, 10000, 300.0, 1000000, 10, 1)
 
 """
     Holds everything one simulation run needs.
@@ -67,29 +68,36 @@ end
 # all constructors for making agents
 function make_agent(::Type{MarketAgent}, id::Int, config::SimulationConfig)
     base_item_price = config.item_base_value
-    MarketAgent(id = id, cash = rand() * config.max_start_money_per_agent,
-                buy_price = (base_item_price * 0.95), sell_price = (base_item_price * 1.05))
+    starting_cash_sim = rand() * config.max_start_money_per_agent
+    MarketAgent(id = id, cash = starting_cash_sim, buy_price = config.item_base_value * 0.95,
+        sell_price = config.item_base_value * 1.05, starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{NoiseAgent}, id::Int, config::SimulationConfig)
-    NoiseAgent(id = id, cash = rand() * config.max_start_money_per_agent)
+    starting_cash_sim = rand() * config.max_start_money_per_agent
+    NoiseAgent(id = id, cash = starting_cash_sim, starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{InformedAgent}, id::Int, config::SimulationConfig)
     base = config.item_base_value
-    InformedAgent(id = id, cash = rand() * config.max_start_money_per_agent,
+    starting_cash_sim = rand() * config.max_start_money_per_agent
+    InformedAgent(id = id, cash = starting_cash_sim,
                   predicted_low = base * (0.7 + 0.2rand()),
-                  predicted_high = base * (1.1 + 0.2rand()))
+                  predicted_high = base * (1.1 + 0.2rand()),
+                  starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{MomentumAgent}, id::Int, config::SimulationConfig)
+    starting_cash_sim = rand() * config.max_start_money_per_agent
     MomentumAgent(id = id, cash = rand() * config.max_start_money_per_agent,
-                  times_waited = 0, avg_time_between_trades = 0.0)
+                  times_waited = 0, avg_time_between_trades = 0.0, starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{ReverseMomentumAgent}, id::Int, config::SimulationConfig)
+    starting_cash_sim = rand() * config.max_start_money_per_agent
     ReverseMomentumAgent(id = id, cash = rand() * config.max_start_money_per_agent,
-                         times_waited = 0, avg_time_between_trades = 0.0)
+                         times_waited = 0, avg_time_between_trades = 0.0,
+                         starting_cash = starting_cash_sim)
 end
 
 """
@@ -103,7 +111,7 @@ function create_agents(config::SimulationConfig)
     next_id = 1
     for AT in AGENT_TYPES
         for _ in 1:rand(1:config.max_agents_per_type)
-            push!(agents, make_agent(AT, next_id, config))
+                push!(agents, make_agent(AT, next_id, config))
             next_id += 1
         end
     end
@@ -129,6 +137,7 @@ function distribute_items!(agents::Vector{AbstractMarketAgent}, config::Simulati
         #record the first owner on the item and give it to the agent
         push!(item.Owners, agent.id)
         push!(agent.assets, item)
+        push!(agent.starting_assets, item)
         items[item.ID] = item
     end
 
@@ -324,8 +333,8 @@ function reprice_market_agents!(sim::Simulation)
     price = market_price(sim)
     for agent in sim.agents
         if agent isa MarketAgent
-            agent.buy_price = price * 0.95
-            agent.sell_price = price * 1.05
+            agent.buy_price = isempty(sim.book.buy_orders) ? sim.config.item_base_value * 1.05 : last(sim.book.buy_orders)[2].item_price * 0.95
+            agent.sell_price = isempty(sim.book.sell_orders) ? sim.config.item_base_value * 1.05 : first(sim.book.sell_orders)[2].item_price * 1.05
         end
     end
     return sim
@@ -359,7 +368,8 @@ function print_summary(sim::Simulation)
     for AT in AGENT_TYPES
         agents_of_type = filter(a -> a isa AT, sim.agents)
         avg_cash = sum(a.cash for a in agents_of_type) / length(agents_of_type)
-        println("  ", nameof(AT), ": ", length(agents_of_type), " (avg cash: ", round(avg_cash, digits = 2), ")")
+        avg_profit = sum(get_profit(agent) for agent in agents_of_type) / length(agents_of_type)
+        println("  ", nameof(AT), ": ", length(agents_of_type), " (avg cash: ", round(avg_cash, digits = 2), ")", " avg. profit: ", round(avg_profit, digits=2))
     end
 
     println()
@@ -382,9 +392,9 @@ function print_summary(sim::Simulation)
     end
 end
 
-@time function main()
+function main()
     sim = Simulation()
-    run!(sim)
+    @time run!(sim)
     print_summary(sim)
 end
 
