@@ -7,7 +7,7 @@ Author: matthiasdejong
 Date: 26.08.26
 =#
 
-const SCRIPT_VERSION = "1.1.0"
+const SCRIPT_VERSION = "1.2.0"
 
 include("Item.jl")
 include("orderbook.jl")
@@ -367,9 +367,13 @@ function print_summary(sim::Simulation)
     println("Agents: ", length(sim.agents))
     for AT in AGENT_TYPES
         agents_of_type = filter(a -> a isa AT, sim.agents)
-        avg_cash = sum(a.cash for a in agents_of_type) / length(agents_of_type)
-        avg_profit = sum(get_profit(agent) for agent in agents_of_type) / length(agents_of_type)
-        println("  ", nameof(AT), ": ", length(agents_of_type), " (avg cash: ", round(avg_cash, digits = 2), ")", " avg. profit: ", round(avg_profit, digits=2))
+        avg_starting_net_worth = sum(get_starting_net_worth(agent) for agent in agents_of_type) / length(agents_of_type)
+        avg_current_net_worth = sum(get_current_net_worth(agent) for agent in agents_of_type) / length(agents_of_type)
+        println("  ", nameof(AT), ": ", length(agents_of_type))
+        println("       (avg starting net worth: ", round(avg_starting_net_worth, digits=2), " )")
+        println("       (avg current net worth: ", round(avg_current_net_worth, digits=2), " )")
+        println("       (avg profit/loss: ", round(avg_current_net_worth - avg_starting_net_worth, digits=2), " )")
+        println("   ")
     end
 
     println()

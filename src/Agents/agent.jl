@@ -8,7 +8,7 @@ Author: matthiasdejong
 Date: 20.08.26
 =#
 
-const SCRIPT_VERSION = "1.1.0"
+const SCRIPT_VERSION = "1.2.0"
 using Agents
 
 abstract type AbstractMarketAgent <: AbstractAgent end
@@ -90,19 +90,25 @@ function record_sell_order!(agent::AbstractMarketAgent, items::Vector{Item}, ite
 end
 
 """
-    returns the profit which the agent made,
-    does also count the value of the assets the agent currently has.
+    gets the net_worth with which the agent started with.
 """
-function get_profit(agent::AbstractMarketAgent)
-    asset_value = 0.0
-    for asset in agent.assets
-        asset_value += asset.latest_value
-    end
-
+function get_starting_net_worth(agent::AbstractMarketAgent)
     starting_assets_value = 0.0
     for starting_asset in agent.starting_assets
         starting_assets_value += starting_asset.latest_value
     end
 
-    return (asset_value + agent.cash) - (agent.starting_cash + starting_assets_value)
+    return (starting_assets_value + agent.starting_cash)
+end
+
+"""
+    returns current net worth of agent
+"""
+function get_current_net_worth(agent::AbstractMarketAgent)
+    asset_value = 0.0
+    for asset in agent.assets
+        asset_value += asset.latest_value
+    end
+
+    return (asset_value + agent.cash)
 end
