@@ -7,7 +7,7 @@ Author: matthiasdejong
 Date: 26.08.26
 =#
 
-const SCRIPT_VERSION = "1.2.0"
+const SCRIPT_VERSION = "1.2.1"
 
 include("Item.jl")
 include("orderbook.jl")
@@ -45,7 +45,7 @@ struct SimulationConfig
     reprice_tick::Int
 end
 
-SimulationConfig() = SimulationConfig(100, 10000.0, 10000, 300.0, 1000000, 10, 1)
+SimulationConfig() = SimulationConfig(100, 10000.0, 10000, 30.0, 1000000, 10, 1)
 
 """
     Holds everything one simulation run needs.
@@ -333,8 +333,11 @@ function reprice_market_agents!(sim::Simulation)
     price = market_price(sim)
     for agent in sim.agents
         if agent isa MarketAgent
-            agent.buy_price = isempty(sim.book.buy_orders) ? sim.config.item_base_value * 1.05 : last(sim.book.buy_orders)[2].item_price * 0.95
-            agent.sell_price = isempty(sim.book.sell_orders) ? sim.config.item_base_value * 1.05 : first(sim.book.sell_orders)[2].item_price * 1.05
+            assets_buy_price = 0.0
+            for item in agent.assets; assets_buy_price += item.latest_value; end
+            avg_buy_price = assets_buy_price / length(agent.assets)
+            agent.buy_price = isempty(sim.book.buy_orders) ? sim.config.item_base_value * 0.95 : price * 0.99
+            agent.sell_price = isempty(sim.book.sell_orders) ? sim.config.item_base_value * 1.05 : avg_buy_price * 1.01
         end
     end
     return sim
@@ -370,9 +373,9 @@ function print_summary(sim::Simulation)
         avg_starting_net_worth = sum(get_starting_net_worth(agent) for agent in agents_of_type) / length(agents_of_type)
         avg_current_net_worth = sum(get_current_net_worth(agent) for agent in agents_of_type) / length(agents_of_type)
         println("  ", nameof(AT), ": ", length(agents_of_type))
-        println("       (avg starting net worth: ", round(avg_starting_net_worth, digits=2), " )")
-        println("       (avg current net worth: ", round(avg_current_net_worth, digits=2), " )")
-        println("       (avg profit/loss: ", round(avg_current_net_worth - avg_starting_net_worth, digits=2), " )")
+        println("       avg starting net worth: ", round(avg_starting_net_worth, digits=2))
+        println("       avg current net worth: ", round(avg_current_net_worth, digits=2))
+        println("       avg profit/loss: ", round(avg_current_net_worth - avg_starting_net_worth, digits=2))
         println("   ")
     end
 
