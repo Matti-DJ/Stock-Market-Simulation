@@ -7,7 +7,7 @@ Author: matthiasdejong
 Date: 26.08.26
 =#
 
-const SCRIPT_VERSION = "1.2.1"
+const SCRIPT_VERSION = "1.3.0"
 
 include("Item.jl")
 include("orderbook.jl")
@@ -20,6 +20,8 @@ include("Agents/reverse_momentum_agent.jl")
 using UUIDs
 using Random
 using Statistics
+using Plots
+plotlyjs()
 
 const AGENT_TYPES = (MarketAgent, NoiseAgent, InformedAgent, MomentumAgent, ReverseMomentumAgent)
 
@@ -344,6 +346,21 @@ function reprice_market_agents!(sim::Simulation)
 end
 
 """
+    plots the item value over the ticks in the simulation.
+
+# Params
+- `sim`
+- `percent_to_plot`: How many percent of the ticks should be ploted.
+"""
+function plot_item_price(sim::Simulation, percent_to_plot::Float64)
+    ticks_between_point = max(1, round(Int, 100.0 / percent_to_plot))
+    x = [trade.tick for trade in sim.book.all_trades]
+    y = [trade.item_price for trade in sim.book.all_trades]
+    p = plot(x[1:ticks_between_point:end], y[1:ticks_between_point:end], title="Item value in the simulation", label="value" ,xlabel="tick", ylabel="item value")
+    return p
+end
+
+"""
     Runs the simulation for `ticker_limit` ticks.
     Each tick one random agent gets to act.
 
@@ -396,6 +413,8 @@ function print_summary(sim::Simulation)
         println("  lowest ever: ", round(minimum(item.lowest_value for item in vals), digits = 2))
         println("  highest ever: ", round(maximum(item.highest_value for item in vals), digits = 2))
         println("  most traded: ", maximum(item.times_traded for item in vals), " times")
+        println("   ")
+        display(plot_item_price(sim, 0.01))
     end
 end
 
@@ -409,3 +428,5 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     main()
 end
+
+readline()
