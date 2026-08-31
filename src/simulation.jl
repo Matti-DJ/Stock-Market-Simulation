@@ -7,7 +7,7 @@ Author: matthiasdejong
 Date: 26.08.26
 =#
 
-const SCRIPT_VERSION = "1.3.0"
+const SCRIPT_VERSION = "1.3.1"
 
 include("Item.jl")
 include("orderbook.jl")
@@ -396,6 +396,26 @@ function plot_item_price(sim::Simulation, percent_to_plot::Float64)
 end
 
 """
+    returns the current net_worth of a agent
+"""
+function get_current_agent_net_worth(sim::Simulation, agent::AbstractMarketAgent)
+    price = market_price(sim)
+    return agent.cash += (length(agent.assets) * price)
+end
+
+"""
+    gets the net_worth with which the agent started with.
+"""
+function get_starting_net_worth(agent::AbstractMarketAgent)
+    starting_assets_value = 0.0
+    for starting_asset in agent.starting_assets
+        starting_assets_value += starting_asset.latest_value
+    end
+
+    return (starting_assets_value + agent.starting_cash)
+end
+
+"""
     Runs the simulation for `ticker_limit` ticks.
     Each tick one random agent gets to act.
 
@@ -423,7 +443,7 @@ function print_summary(sim::Simulation)
     for AT in AGENT_TYPES
         agents_of_type = filter(a -> a isa AT, sim.agents)
         avg_starting_net_worth = sum(get_starting_net_worth(agent) for agent in agents_of_type) / length(agents_of_type)
-        avg_current_net_worth = sum(get_current_net_worth(agent) for agent in agents_of_type) / length(agents_of_type)
+        avg_current_net_worth = sum(get_current_agent_net_worth(sim, agent) for agent in agents_of_type) / length(agents_of_type)
         println("  ", nameof(AT), ": ", length(agents_of_type))
         println("       avg starting net worth: ", round(avg_starting_net_worth, digits=2))
         println("       avg current net worth: ", round(avg_current_net_worth, digits=2))

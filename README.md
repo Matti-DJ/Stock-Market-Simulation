@@ -119,7 +119,6 @@ src/
 #### _Item_
 
 #### _Agent_
-  - fix profit tracking
 
 #### _OrderBook_
   - upgrade the order matching to something more advanced.
