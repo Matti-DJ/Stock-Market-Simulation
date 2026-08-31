@@ -119,7 +119,7 @@ src/
 #### _Item_
 
 #### _Agent_
-  - Add a strategy / algorythm to the informed traded.
+  - fix profit tracking
 
 #### _OrderBook_
   - upgrade the order matching to something more advanced.

@@ -122,6 +122,11 @@ function create_agents(config::SimulationConfig)
 end
 
 """
+    returns the current net worth of a agent
+"""
+wealth(sim::Simulation, a::AbstractMarketAgent) = a.cash + length(a.assets) * market_price(sim)
+
+"""
     Distributes the total amount of items among all the agents.
     It does not guarantee that all agents get items.
 
@@ -284,12 +289,42 @@ function agent_step!(sim::Simulation, agent::InformedAgent)
     agent.predicted_high = (agent.predicted_high + price * 1.1) / 2
     agent.predicted_low = (agent.predicted_low + price * 0.9) / 2
 
-    if price <= agent.predicted_low
-        ask = get_price_of_cheapest_sellorder(sim.book)
-        buy_random_amount!(sim, agent, ask === nothing ? price : ask)
-    elseif price >= agent.predicted_high && !isempty(agent.assets)
-        bid = get_price_of_highest_buyorder(sim.book)
-        sell_random_amount!(sim, agent, bid === nothing ? price : bid)
+    if agent.last_arm != 0
+        r = wealth(sim, agent) - agent.last_wealth
+        la = agent.last_arm
+        agent.arm_visits[la] += 1
+        agent.arm_reward[la] += (r - agent.arm_reward[la]) / agent.arm_visits[la]
+    end
+
+    arm = if any(agent.arm_visits .== 0)
+        findfirst(agent.arm_visits .== 0)
+    else
+        ucb = agent.arm_reward .+ 2 .* sqrt.(log(agent.total_pulls) ./ agent.arm_visits)
+        argmax(ucb)
+    end
+
+    play_arm!(sim, agent, arm)
+    agent.total_pulls += 1
+    agent.last_arm = arm
+    agent.last_wealth = wealth(sim, agent)
+end
+
+"""
+    plays a arm
+
+# Param
+- `sim`
+- `agent`
+- `arm`: the action it should do
+"""
+function play_arm!(sim::Simulation, agent::InformedAgent, arm::Int)
+    price = market_price(sim)
+    if arm == 1
+        if price <= agent.predicted_low; buy_random_amount!(sim, agent, price); end
+    elseif arm == 2
+        if price >= agent.predicted_high && !isempty(agent.assets); put_up_sell_order!(sim.book, sim.agent_index, agent.id, agent.assets[1:1], price); end
+    else
+
     end
 end
 
