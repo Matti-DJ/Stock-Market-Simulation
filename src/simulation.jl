@@ -26,6 +26,21 @@ plotlyjs()
 const AGENT_TYPES = (MarketAgent, NoiseAgent, InformedAgent, MomentumAgent, ReverseMomentumAgent)
 
 """
+    Rough real-market composition by head count. Real order flow is dominated by
+    uninformed / retail traders, with a smaller slice of fundamental traders,
+    fewer trend followers and contrarians, and only a handful of designated
+    market makers. The weights are fractions of `config.max_agents_per_type`,
+    so that field scales the whole crowd while keeping the mix realistic.
+"""
+const AGENT_MIX = Dict{DataType, Float64}(
+    NoiseAgent           => 1.0,
+    InformedAgent        => 0.15,
+    MomentumAgent        => 0.08,
+    ReverseMomentumAgent => 0.04,
+    MarketAgent          => 0.01,
+)
+
+"""
     configurations for the market simulation.
 
 # Fields
@@ -47,7 +62,21 @@ struct SimulationConfig
     reprice_tick::Int
 end
 
-SimulationConfig() = SimulationConfig(100, 10000.0, 10000, 30.0, 1000000, 10, 1)
+# Default scenario: one moderately liquid mid-cap stock (~$100 / share) with
+# ~2,500 participants (retail-heavy, see `AGENT_MIX`), run for one long trading
+# period. The numbers are picked so the ratios between them stay realistic:
+#   - ~200 shares outstanding per agent  -> a real free float, not a thin book
+#   - ~800 actions per agent             -> enough turns for behaviour to show
+#   - market makers requote every tick   -> continuous two-sided quoting
+SimulationConfig() = SimulationConfig(
+    2_000,        # max_agents_per_type (scaled down per type by AGENT_MIX)
+    250_000.0,    # max_start_money_per_agent (scale of a log-normal cash draw)
+    500_000,      # max_start_items_total (~200 shares per agent)
+    100.0,        # item_base_value (typical mid-cap share price)
+    2_000_000,    # ticker_limit
+    50,           # momentum_trade_window (classic ~50-period trend lookback)
+    1,            # reprice_tick
+)
 
 """
     Holds everything one simulation run needs.
@@ -67,37 +96,50 @@ struct Simulation
     agent_index::Dict{Int, AbstractMarketAgent}
 end
 
+"""
+    A log-normal starting-cash draw. Real account sizes are heavily right skewed:
+    most participants are small retail accounts and a few are large institutions,
+    which a uniform `rand()` never captures. `config.max_start_money_per_agent`
+    sets the scale (roughly the upper end of the retail bulk); the tail can run
+    above it and is clamped to keep a single whale from owning the whole float.
+"""
+function draw_starting_cash(config::SimulationConfig)
+    scale = config.max_start_money_per_agent
+    cash = (scale / 16) * exp(1.4 * randn())   # median ~ scale/16, heavy tail
+    return clamp(cash, 500.0, scale * 50)
+end
+
 # all constructors for making agents
 function make_agent(::Type{MarketAgent}, id::Int, config::SimulationConfig)
-    base_item_price = config.item_base_value
-    starting_cash_sim = rand() * config.max_start_money_per_agent
-    MarketAgent(id = id, cash = starting_cash_sim, buy_price = config.item_base_value * 0.95,
-        sell_price = config.item_base_value * 1.05, starting_cash = starting_cash_sim)
+    # market makers are well capitalised so they can hold inventory through swings
+    starting_cash_sim = config.max_start_money_per_agent * (5.0 + 5.0rand())
+    MarketAgent(id = id, cash = starting_cash_sim, buy_price = config.item_base_value * 0.999,
+        sell_price = config.item_base_value * 1.001, starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{NoiseAgent}, id::Int, config::SimulationConfig)
-    starting_cash_sim = rand() * config.max_start_money_per_agent
+    starting_cash_sim = draw_starting_cash(config)
     NoiseAgent(id = id, cash = starting_cash_sim, starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{InformedAgent}, id::Int, config::SimulationConfig)
     base = config.item_base_value
-    starting_cash_sim = rand() * config.max_start_money_per_agent
+    starting_cash_sim = draw_starting_cash(config)
     InformedAgent(id = id, cash = starting_cash_sim,
-                  predicted_low = base * (0.7 + 0.2rand()),
-                  predicted_high = base * (1.1 + 0.2rand()),
+                  predicted_low = base * (0.90 + 0.05rand()),
+                  predicted_high = base * (1.05 + 0.05rand()),
                   starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{MomentumAgent}, id::Int, config::SimulationConfig)
-    starting_cash_sim = rand() * config.max_start_money_per_agent
-    MomentumAgent(id = id, cash = rand() * config.max_start_money_per_agent,
+    starting_cash_sim = draw_starting_cash(config)
+    MomentumAgent(id = id, cash = starting_cash_sim,
                   times_waited = 0, avg_time_between_trades = 0.0, starting_cash = starting_cash_sim)
 end
 
 function make_agent(::Type{ReverseMomentumAgent}, id::Int, config::SimulationConfig)
-    starting_cash_sim = rand() * config.max_start_money_per_agent
-    ReverseMomentumAgent(id = id, cash = rand() * config.max_start_money_per_agent,
+    starting_cash_sim = draw_starting_cash(config)
+    ReverseMomentumAgent(id = id, cash = starting_cash_sim,
                          times_waited = 0, avg_time_between_trades = 0.0,
                          starting_cash = starting_cash_sim)
 end
@@ -112,8 +154,10 @@ function create_agents(config::SimulationConfig)
     agents = AbstractMarketAgent[]
     next_id = 1
     for AT in AGENT_TYPES
-        for _ in 1:rand(1:config.max_agents_per_type)
-                push!(agents, make_agent(AT, next_id, config))
+        weight = get(AGENT_MIX, AT, 1.0)
+        count = max(1, round(Int, config.max_agents_per_type * weight))
+        for _ in 1:count
+            push!(agents, make_agent(AT, next_id, config))
             next_id += 1
         end
     end
@@ -211,7 +255,9 @@ end
 - `item_price`
 """
 function sell_random_amount!(sim::Simulation, agent::AbstractMarketAgent, item_price::Float64)
-    quantity = rand(1:length(agent.assets))
+    #real orders move a small slice of a position, not the whole book at once;
+    #cap at 3 to mirror the buy side
+    quantity = rand(1:min(3, length(agent.assets)))
     #the slice makes a new vector, the order takes ownership of it
     put_up_sell_order!(sim.book, sim.agent_index, agent.id, agent.assets[1:quantity], item_price)
 end
@@ -245,7 +291,8 @@ end
 """
 function agent_step!(sim::Simulation, agent::NoiseAgent)
     cancel_orders!(sim.book, agent.id)
-    item_price = market_price(sim) * (0.9 + 0.2rand())
+    #limit prices cluster within ~1% of the mid, not ±10%
+    item_price = market_price(sim) * (0.99 + 0.02rand())
 
     if !isempty(agent.assets) && rand(Bool)
         sell_random_amount!(sim, agent, item_price)
@@ -285,9 +332,15 @@ function agent_step!(sim::Simulation, agent::InformedAgent)
     cancel_orders!(sim.book, agent.id)
     price = market_price(sim)
 
-    #the predictions drift towards the current market price
-    agent.predicted_high = (agent.predicted_high + price * 1.1) / 2
-    agent.predicted_low = (agent.predicted_low + price * 0.9) / 2
+    #A fundamental trader anchors to intrinsic value, not to price. The band is
+    #pulled mostly toward `item_base_value` (fair value) and only slightly toward
+    #the current price, so the informed crowd leans against big dislocations and
+    #the market keeps a value anchor instead of a free random walk. The agent
+    #then acts on a ~5% mispricing.
+    fair = sim.config.item_base_value
+    target = 0.8 * fair + 0.2 * price
+    agent.predicted_high = (agent.predicted_high + target * 1.05) / 2
+    agent.predicted_low = (agent.predicted_low + target * 0.95) / 2
 
     if agent.last_arm != 0
         r = wealth(sim, agent) - agent.last_wealth
@@ -368,13 +421,14 @@ agent_step!(sim::Simulation, agent::ReverseMomentumAgent) = momentum_step!(sim, 
 """
 function reprice_market_agents!(sim::Simulation)
     price = market_price(sim)
+    #quote ~10 bps either side of the last price -> a ~20 bps spread, in line with
+    #a liquid mid-cap. `market_price` already falls back to the base value before
+    #the first trade, so no separate empty-book branch is needed.
+    half_spread = 0.001
     for agent in sim.agents
         if agent isa MarketAgent
-            assets_buy_price = 0.0
-            for item in agent.assets; assets_buy_price += item.latest_value; end
-            avg_buy_price = assets_buy_price / length(agent.assets)
-            agent.buy_price = isempty(sim.book.buy_orders) ? sim.config.item_base_value * 0.95 : price * 0.99
-            agent.sell_price = isempty(sim.book.sell_orders) ? sim.config.item_base_value * 1.05 : avg_buy_price * 1.01
+            agent.buy_price  = price * (1 - half_spread)
+            agent.sell_price = price * (1 + half_spread)
         end
     end
     return sim

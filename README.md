@@ -90,13 +90,17 @@ print_summary(sim)
 
 | Field                     | Meaning                                                              |
 |---------------------------|-----------------------------------------------------------------------|
-| `max_agents_per_type`     | Upper bound on how many agents of each type get created (at least 1) |
-| `max_start_money_per_agent` | Upper bound on each agent's starting cash                          |
-| `max_start_items_total`   | How many items exist in total, randomly handed out to agents         |
-| `item_base_value`         | Starting value of every item, and the market price before any trade  |
-| `ticker_limit`            | How many ticks the simulation runs for                               |
+| `max_agents_per_type`     | Size of the largest cohort; each type is scaled from it by `AGENT_MIX` (retail-heavy, ~1% market makers) |
+| `max_start_money_per_agent` | Scale of the log-normal starting-cash draw (most agents small, a heavy tail of large accounts); market makers start much richer |
+| `max_start_items_total`   | How many items exist in total (the free float), randomly handed out to agents |
+| `item_base_value`         | Starting value of every item, the market price before any trade, and the fair value the informed agents anchor to |
+| `ticker_limit`            | How many ticks the simulation runs for (one agent acts per tick)     |
 | `momentum_trade_window`   | How many recent trades the momentum agents compare to detect a trend |
-| `reprice_tick`            | How often (in ticks) market agents recompute their buy/sell price    |
+| `reprice_tick`            | How often (in ticks) market agents recompute their buy/sell quote (1 = every tick) |
+
+The default `SimulationConfig()` models one moderately liquid mid-cap stock
+(~$100/share, ~2,500 participants). Market makers quote a ~20 bps spread around
+the last price and noise traders place limit prices within ~1% of the mid.
 
 ## Project layout
 
