@@ -2,12 +2,13 @@
 # Julia Script
 
 #=
-Description: The orderbook is responsible for hosting and matching all trades which agents put up.
+Description: The orderbook hosts and matches all trades which agents put up.
+             There is one order book per asset symbol.
 Author: matthiasdejong
 Date: 24.08.26
 =#
 
-const SCRIPT_VERSION = "1.0.0"
+const SCRIPT_VERSION = "2.0.0"
 
 using DataStructures
 using UUIDs
@@ -18,15 +19,17 @@ include("Agents/agent.jl")
 
 # Fields
 - `id`
-- `items`: list of items which are traded
-- `item_price`: price of a singular item
+- `symbol`: which asset was traded
+- `quantity`: how many units changed hands
+- `item_price`: price of a single unit
 - `tick`: at which orderbook-tick this trade was executed
 - `seller_id`
 - `buyer_id`
 """
 mutable struct Trade
     id::UUID
-    items::Vector{Item}
+    symbol::Symbol
+    quantity::Int
     item_price::Float64
     tick::Int
     seller_id::Int
@@ -39,14 +42,16 @@ end
 #Fields
 - `id`
 - `seller_id`
-- `items`
+- `symbol`: which asset is offered
+- `quantity`: units still open on this order
 - `item_price`
 - `tick`: at which tick in the simulation the order was placed
 """
 mutable struct SellOrder
     id::UUID
     seller_id::Int
-    items::Vector{Item}
+    symbol::Symbol
+    quantity::Int
     item_price::Float64
     tick::Int
 end
@@ -57,13 +62,15 @@ end
 #Fields
 - `id`
 - `buyer_id`
-- `quantity`
+- `symbol`: which asset is wanted
+- `quantity`: units still open on this order
 - `item_price`
 - `tick`: at which tick in the simulation the order was placed
 """
 mutable struct BuyOrder
     id::UUID
     buyer_id::Int
+    symbol::Symbol
     quantity::Int
     item_price::Float64
     tick::Int
@@ -71,10 +78,11 @@ end
 
 
 """
-    The order book keeps track of all Sell- and Buy-Orders.
+    The order book keeps track of all Sell- and Buy-Orders for a single asset.
     It also is responsible for matching these orders.
 """
 mutable struct OrderBook
+    symbol::Symbol
     sell_orders::SortedDict{Tuple{Float64, Int}, SellOrder}
     buy_orders::SortedDict{Tuple{Float64, Int}, BuyOrder}
     ticker::Int
@@ -83,7 +91,7 @@ mutable struct OrderBook
     all_trades::Vector{Trade}
 end
 
-OrderBook() = OrderBook(SortedDict{Tuple{Float64, Int}, SellOrder}(), SortedDict{Tuple{Float64, Int}, BuyOrder}(), 0, 0, 0.0, Trade[])
+OrderBook(symbol::Symbol) = OrderBook(symbol, SortedDict{Tuple{Float64, Int}, SellOrder}(), SortedDict{Tuple{Float64, Int}, BuyOrder}(), 0, 0, 0.0, Trade[])
 
 function get_total_trades(book::OrderBook)::Int
     return length(book.all_trades)
@@ -115,7 +123,7 @@ end
 """
     Removes all open orders of one agent from the book.
     Nothing has to be given back because the book never holds
-    the cash or the items of an open order, only the agent does.
+    the cash or the units of an open order, only the agent does.
 
 #Params
 - `book`
@@ -133,32 +141,31 @@ end
 
 """
     Records a trade that was triggered by a buy order and logs it.
-    On the item side the owner will be updated, the buyer gets the items added
-    to his assets and the seller gets the items removed from his assets.
+    On the asset side the price tracking is updated, the buyer gets the units
+    added to his holdings and the seller gets them removed.
 
 #Params
-- `book`: Orderbook
+- `book`: order book for `asset`
 - `model`: the agent based model, used to look up the agents by their id
+- `asset`: the asset being traded
 - `buyer_id`
 - `seller_id`
-- `items`
+- `quantity`
 - `item_price`
 """
-function execute_buy_order!(book::OrderBook, model, buyer_id::Int, seller_id::Int, items::Vector{Item}, item_price::Float64)::OrderBook
-    order = Trade(uuid4(), items, item_price, book.ticker, seller_id, buyer_id)
-    push!(book.all_trades, order)
+function execute_buy_order!(book::OrderBook, model, asset::Asset, buyer_id::Int, seller_id::Int, quantity::Int, item_price::Float64)::OrderBook
+    trade = Trade(uuid4(), asset.symbol, quantity, item_price, book.ticker, seller_id, buyer_id)
+    push!(book.all_trades, trade)
 
-    book.total_items_traded += length(items)
-    book.total_value_traded += (length(items)*item_price)
+    book.total_items_traded += quantity
+    book.total_value_traded += quantity * item_price
 
-    #record trade on item side
-    for item in items
-        record_trade!(item, buyer_id, item_price)
-    end
+    #record trade on the asset side
+    record_trade!(asset, item_price)
 
     #record trade on agent side (both counterparties)
-    record_sell_order!(model[seller_id], items, item_price, book.ticker)
-    record_buy_order!(model[buyer_id], items, item_price, book.ticker)
+    record_sell_order!(model[seller_id], asset.symbol, quantity, item_price, book.ticker)
+    record_buy_order!(model[buyer_id], asset.symbol, quantity, item_price, book.ticker)
 
     book.ticker += 1
     return book
@@ -166,64 +173,64 @@ end
 
 """
     Records a trade that was triggered by a sell order and logs it.
-    On the item side the owner will be updated, the buyer gets the items added
-    to his assets and the seller gets the items removed from his assets.
+    On the asset side the price tracking is updated, the buyer gets the units
+    added to his holdings and the seller gets them removed.
 
 #Params
-- `book`
+- `book`: order book for `asset`
 - `model`: the agent based model, used to look up the agents by their id
+- `asset`: the asset being traded
 - `buyer_id`
 - `seller_id`
-- `items`
+- `quantity`
 - `item_price`
 """
-function execute_sell_order!(book::OrderBook, model, buyer_id::Int, seller_id::Int, items::Vector{Item}, item_price::Float64)::OrderBook
-    order = Trade(uuid4(), items, item_price, book.ticker, seller_id, buyer_id)
-    push!(book.all_trades, order)
+function execute_sell_order!(book::OrderBook, model, asset::Asset, buyer_id::Int, seller_id::Int, quantity::Int, item_price::Float64)::OrderBook
+    trade = Trade(uuid4(), asset.symbol, quantity, item_price, book.ticker, seller_id, buyer_id)
+    push!(book.all_trades, trade)
 
-    book.total_items_traded += length(items)
-    book.total_value_traded += (length(items)*item_price)
+    book.total_items_traded += quantity
+    book.total_value_traded += quantity * item_price
 
-    #record trade on item side
-    for item in items
-        record_trade!(item, buyer_id, item_price)
-    end
+    #record trade on the asset side
+    record_trade!(asset, item_price)
 
     #record trade on agent side (both counterparties)
-    record_sell_order!(model[seller_id], items, item_price, book.ticker)
-    record_buy_order!(model[buyer_id], items, item_price, book.ticker)
+    record_sell_order!(model[seller_id], asset.symbol, quantity, item_price, book.ticker)
+    record_buy_order!(model[buyer_id], asset.symbol, quantity, item_price, book.ticker)
 
     book.ticker += 1
     return book
 end
 
 """
-    Puts up a buy order up and tries to match it immediately.
+    Puts a buy order up and tries to match it immediately.
     updates fields for tracking.
 
 #Params
-- `book`
+- `book`: order book for `asset`
 - `model`: the agent based model, used to look up the agents by their id
+- `asset`: the asset being bought
 - `buyer_id`
 - `quantity`
 - `item_price`
 """
-function put_up_buy_order!(book::OrderBook, model, buyer_id, quantity::Int, item_price::Float64)::OrderBook
-    order = BuyOrder(uuid4(), buyer_id, quantity, item_price, book.ticker)
+function put_up_buy_order!(book::OrderBook, model, asset::Asset, buyer_id, quantity::Int, item_price::Float64)::OrderBook
+    order = BuyOrder(uuid4(), buyer_id, asset.symbol, quantity, item_price, book.ticker)
 
     #find fitting sell orders
-    remaining_items = order.quantity
-    while remaining_items > 0 && !isempty(book.sell_orders)
+    remaining = order.quantity
+    while remaining > 0 && !isempty(book.sell_orders)
         key, sell_order = first(book.sell_orders)
         if sell_order.item_price > order.item_price; break; end
-        fill_qty = min(remaining_items, length(sell_order.items))
-        traded_items = splice!(sell_order.items, 1:fill_qty)
-        execute_buy_order!(book, model, buyer_id, sell_order.seller_id, traded_items, item_price)
-        remaining_items -= fill_qty
-        if length(sell_order.items) == 0; delete!(book.sell_orders, key); end
+        fill_qty = min(remaining, sell_order.quantity)
+        execute_buy_order!(book, model, asset, buyer_id, sell_order.seller_id, fill_qty, item_price)
+        sell_order.quantity -= fill_qty
+        remaining -= fill_qty
+        if sell_order.quantity == 0; delete!(book.sell_orders, key); end
     end
 
-    order.quantity = remaining_items
+    order.quantity = remaining
     #adds the order to buy orders if it can't be completed immediately
     if order.quantity > 0; book.buy_orders[(-order.item_price, order.tick)] = order; end
 
@@ -232,32 +239,33 @@ function put_up_buy_order!(book::OrderBook, model, buyer_id, quantity::Int, item
 end
 
 """
-    puts up the sell order and tries to immediately match it to a buy order.
-    If it can't find a match it will add id to the "sell_orders" in the book.
+    Puts the sell order up and tries to immediately match it to a buy order.
+    If it can't find a match it will add it to the `sell_orders` in the book.
 
 #Params
-- `book`
+- `book`: order book for `asset`
 - `model`: the agent based model, used to look up the agents by their id
+- `asset`: the asset being sold
 - `seller_id`
-- `items`
+- `quantity`
 - `item_price`
 """
-function put_up_sell_order!(book::OrderBook, model, seller_id, items::Vector{Item}, item_price::Float64)::OrderBook
-    order = SellOrder(uuid4(), seller_id, items, item_price, book.ticker)
+function put_up_sell_order!(book::OrderBook, model, asset::Asset, seller_id, quantity::Int, item_price::Float64)::OrderBook
+    order = SellOrder(uuid4(), seller_id, asset.symbol, quantity, item_price, book.ticker)
 
     #find fitting buy orders
-    while length(order.items) > 0 && !isempty(book.buy_orders)
+    while order.quantity > 0 && !isempty(book.buy_orders)
         key, buy_order = first(book.buy_orders)
         if buy_order.item_price < order.item_price; break; end
-        fill_qty = min(length(order.items), buy_order.quantity)
-        traded_items = splice!(order.items, 1:fill_qty)
-        execute_sell_order!(book, model, buy_order.buyer_id, seller_id, traded_items, item_price)
+        fill_qty = min(order.quantity, buy_order.quantity)
+        execute_sell_order!(book, model, asset, buy_order.buyer_id, seller_id, fill_qty, item_price)
+        order.quantity -= fill_qty
         buy_order.quantity -= fill_qty
         if buy_order.quantity == 0; delete!(book.buy_orders, key); end
     end
 
     #adds the sell order to the DICT if it can't be filled immediately
-    if length(order.items) > 0; book.sell_orders[(order.item_price, order.tick)] = order; end
+    if order.quantity > 0; book.sell_orders[(order.item_price, order.tick)] = order; end
 
     book.ticker += 1
     return book

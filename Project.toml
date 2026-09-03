@@ -1,6 +1,6 @@
 name = "Stock_Market_Simulation"
 uuid = "8d9c170c-8678-48a7-bd12-429149b547e6"
-version = "0.1.0"
+version = "0.2.1"
 authors = ["Matti-DJ <matthias.dejong@icloud.com>"]
 
 [deps]

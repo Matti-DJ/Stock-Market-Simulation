@@ -8,7 +8,7 @@ Author: matthiasdejong
 Date: 20.08.26
 =#
 
-const SCRIPT_VERSION = "1.3.0"
+const SCRIPT_VERSION = "2.0.0"
 using Agents
 
 abstract type AbstractMarketAgent <: AbstractAgent end
@@ -18,19 +18,21 @@ abstract type AbstractMarketAgent <: AbstractAgent end
     The generic agent with no behaviour,
     it contains all shared fields.
 
-- `cash`: cash on hand to buy the items
-- `assets`: all items the agent owns
-- `items_bought`: How many items the agent has bought
-- `items_sold`: how many items the agent has sold
-- `volume_bought`: items the agent has bought as price
-- `volume_sold`: items the agent has sold as price
-- `ticks_of_trades`: The tick of each trade
+- `cash`: cash on hand to buy assets
+- `holdings`: how many units of each asset the agent owns, keyed by symbol
+- `items_bought`: how many units the agent has bought in total
+- `items_sold`: how many units the agent has sold in total
+- `volume_bought`: units bought valued at their trade price
+- `volume_sold`: units sold valued at their trade price
+- `ticks_of_trades`: the tick of each trade
 - `buy_orders`
 - `sell_orders`
+- `starting_cash`
+- `starting_holdings`: units of each asset the agent was handed at the start
 """
 @agent struct Agent(NoSpaceAgent) <: AbstractMarketAgent
     cash::Float64 = 0.0
-    assets::Vector{Item} = Item[]
+    holdings::Dict{Symbol, Int} = Dict{Symbol, Int}()
     items_bought::Int = 0
     items_sold::Int = 0
     volume_bought::Float64 = 0.0
@@ -39,25 +41,36 @@ abstract type AbstractMarketAgent <: AbstractAgent end
     buy_orders::Int = 0
     sell_orders::Int = 0
     starting_cash::Float64 = 0.0
-    starting_assets::Vector{Item} = Item[]
+    starting_holdings::Dict{Symbol, Int} = Dict{Symbol, Int}()
 end
 
 """
-    Adds the new Items to the agent and updates other fields.
+    How many units of `sym` the agent currently holds (0 if it holds none).
+"""
+holding(agent::AbstractMarketAgent, sym::Symbol) = get(agent.holdings, sym, 0)
+
+"""
+    Total number of units the agent holds across every asset.
+"""
+total_units(agent::AbstractMarketAgent) = sum(values(agent.holdings); init = 0)
+
+"""
+    Settles a buy on the agent side: pays the cash and adds the units.
 
 # Params
-- `agent`: the agent who bought the items.
-- `items`
-- `item_value`
-- `tick`: The tick at which the trade was done
+- `agent`: the agent who bought
+- `sym`: which asset was bought
+- `quantity`: how many units
+- `item_value`: price per unit
+- `tick`: the tick at which the trade was done
 """
-function record_buy_order!(agent::AbstractMarketAgent, items::Vector{Item}, item_value::Float64, tick::Int)::AbstractMarketAgent
-    (agent.cash - (length(items)*item_value) >= 0) ? agent.cash -= (length(items)*item_value) : error("Not enough Money")
-    append!(agent.assets, items)
+function record_buy_order!(agent::AbstractMarketAgent, sym::Symbol, quantity::Int, item_value::Float64, tick::Int)::AbstractMarketAgent
+    cost = quantity * item_value
+    (agent.cash - cost >= 0) ? agent.cash -= cost : error("Not enough Money")
+    agent.holdings[sym] = holding(agent, sym) + quantity
 
-
-    agent.items_bought += length(items)
-    agent.volume_bought += (length(items)*item_value)
+    agent.items_bought += quantity
+    agent.volume_bought += cost
 
     push!(agent.ticks_of_trades, tick)
     agent.buy_orders += 1
@@ -66,22 +79,24 @@ function record_buy_order!(agent::AbstractMarketAgent, items::Vector{Item}, item
 end
 
 """
-    Removes the sold items from the agent and updates other fields
+    Settles a sell on the agent side: removes the units and takes in the cash.
 
 # Params
-- `agent`: the agent who sold the items
-- `items`: the items sold
-- `item_value`: the price at which the items were sold
-- `tick`: The tick at which the trade was done
+- `agent`: the agent who sold
+- `sym`: which asset was sold
+- `quantity`: how many units
+- `item_value`: price per unit
+- `tick`: the tick at which the trade was done
 """
-function record_sell_order!(agent::AbstractMarketAgent, items::Vector{Item}, item_value::Float64, tick::Int)::AbstractMarketAgent
-    quantity = length(items)
-    all(item -> item in agent.assets, items) ? filter!(a -> !(a in items), agent.assets) : error("Not enough items to sell")
+function record_sell_order!(agent::AbstractMarketAgent, sym::Symbol, quantity::Int, item_value::Float64, tick::Int)::AbstractMarketAgent
+    holding(agent, sym) >= quantity || error("Not enough items to sell")
+    agent.holdings[sym] -= quantity
 
-    agent.cash += (quantity * item_value)
+    proceeds = quantity * item_value
+    agent.cash += proceeds
 
     agent.items_sold += quantity
-    agent.volume_sold += (quantity * item_value)
+    agent.volume_sold += proceeds
 
     push!(agent.ticks_of_trades, tick)
     agent.sell_orders += 1
